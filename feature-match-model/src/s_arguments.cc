@@ -141,7 +141,7 @@ bool s_arguments::save(const std::string &_file_name)
     file << "[right-image]\t\t=\t" << workspace + "R.png" << std::endl;
     file << "[left-mask]\t\t=\t" << workspace + "L-mask.png" << std::endl;
     file << "[right-mask]\t\t=\t" << workspace + "R-mask.png" << std::endl;
-    file << "[max-disparity]\t\t=\t10" << std::endl;
+    file << "[max-disparity]\t\t=\t50" << std::endl;
     file << "[window-size]\t\t=\t31" << std::endl;
     file << "[lambda-appearance]\t\t=\t1" << std::endl;
     file << "[lambda-occlusion]\t\t=\t1" << std::endl;

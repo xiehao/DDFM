@@ -47,6 +47,8 @@ public:
 private:
     /*!< prepare data */
     bool prepare_data(void);
+    /*!< save data */
+    bool save_features(const std::string &_file_name, const t_feature_set &_features);
 
     /*!< construct the appearance term (similarity in between pair element) */
     bool prepare_appearance_term(void);

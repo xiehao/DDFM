@@ -88,7 +88,7 @@ bool c_matching_model::save(const std::string &_file_name)
             }
         }
     }
-#if 0
+#if 1
     /*!< OPTIONAL: print neighbors */
     const std::vector<std::vector<int> > &left_neighbors =
             m_p_global_data->m_neighbors_left;
@@ -174,6 +174,7 @@ bool c_matching_model::prepare_data(void)
     build_knn(features_left, features_left_cv, knn_left);
     build_neighbors(features_left, knn_left,
                     m_p_global_data->m_neighbors_left);
+    save_features(workspace + "left-features.txt", features_left);
 
     /*!< construct the right features from right mask */
     t_feature_set &features_right = m_p_global_data->m_features_right;
@@ -195,6 +196,7 @@ bool c_matching_model::prepare_data(void)
     build_knn(features_right, feature_right_cv, knn_right);
     build_neighbors(features_right, knn_right,
                     m_p_global_data->m_neighbors_right);
+    save_features(workspace + "right-features.txt", features_right);
 
 
     /*!< construct matches from both images */
@@ -208,17 +210,21 @@ bool c_matching_model::prepare_data(void)
     {
         int i_row = cit->y;
         int i_col = cit->x;
-        int i_col_beg = std::max(0, cit->x - max_disparity);
+        int i_col_beg = std::max(0, i_col - max_disparity);
         std::vector<int> &match_left = map_left[i_left];
         match_left.reserve(i_col - i_col_beg + 1);
+        const uchar *p_mask = right_mask.ptr<uchar>(i_row);
         for (; i_col >= i_col_beg; --i_col)
         {
-            cv::Point point_right(i_col, i_row);
-            int i_right = get_index(knn_right, point_right);
+            if (p_mask[i_col])
+            {
+                cv::Point point_right(i_col, i_row);
+                int i_right = get_index(knn_right, point_right);
 
-            match_left.push_back(i_right);
-            map_right[i_right].push_back(i_left);
-            match_set.push_back(cv::Point(i_left, i_right));
+                match_left.push_back(i_right);
+                map_right[i_right].push_back(i_left);
+                match_set.push_back(cv::Point(i_left, i_right));
+            }
         }
     }
     m_coefficients_unary.reserve(match_set.size());
@@ -227,6 +233,23 @@ bool c_matching_model::prepare_data(void)
     cv::Mat_<float> &match_set_cv = m_p_global_data->m_match_set_cv;
     build_knn(match_set, match_set_cv, m_p_global_data->m_knn_match_set);
 
+    return true;
+}
+
+bool c_matching_model::save_features(const std::string &_file_name,
+                                     const t_feature_set &_features)
+{
+    std::ofstream file(_file_name.c_str());
+    file.clear();
+
+    t_feature_set::const_iterator cit = _features.begin();
+    t_feature_set::const_iterator cit_end = _features.end();
+    for (int i = 0; cit != cit_end; ++cit, ++i)
+    {
+        file << i << '\t' << cit->x << '\t' << cit->y << std::endl;
+    }
+
+    file.close();
     return true;
 }
 
@@ -300,17 +323,17 @@ bool c_matching_model::prepare_coherence_term(void)
 {
     /*!< for every two neighbors, analysis coherence consistency */
     size_t n_neighbor_set = build_neighbors_set();
+    if (n_neighbor_set < 2)
+    {
+        std::cerr << "Error! Too few elements in neighbors set N_p..."
+                  << std::endl;
+        return false;
+    }
+
     const std::vector<cv::Point> &match_set = m_p_global_data->m_match_set;
     cv::flann::Index &knn = m_p_global_data->m_knn_match_set;
     const float lambda = m_p_arguments->m_lambda_coherence;
-#if 0
-    const size_t n_left = m_p_global_data->m_neighbors_set_left.size();
-    const size_t n_right = m_p_global_data->m_neighbors_set_right.size();
 
-    assert(n_left >= 2 && n_right >= 2);
-
-    const float n_neighbor_set = n_left + n_right;
-#endif
     const float coefficient_u = lambda / n_neighbor_set;
     const float coefficient_b = -2 * lambda / n_neighbor_set;
 
@@ -319,7 +342,7 @@ bool c_matching_model::prepare_coherence_term(void)
     size_t n_points = m_p_global_data->m_features_left.size();
     const std::vector<std::vector<int> > &left_matches =
             m_p_global_data->m_matches_left;
-#if 0
+
     std::vector<cv::Point>::const_iterator cit =
             m_p_global_data->m_neighbors_set_left.begin();
     std::vector<cv::Point>::const_iterator cit_end =
@@ -328,148 +351,121 @@ bool c_matching_model::prepare_coherence_term(void)
     {
         int p = cit->x;
         int q = cit->y;
+        std::vector<int> indices_p, indices_q; /*!< indices of matches */
+        indices_p.reserve(left_matches[p].size());
+        indices_q.reserve(left_matches[q].size());
+
         /*!< unary coefficients */
         std::vector<int>::const_iterator cit_m = left_matches[p].begin();
         std::vector<int>::const_iterator cit_m_end = left_matches[p].end();
         for (; cit_m != cit_m_end; ++cit_m)
         {
-            int index = get_index(knn, cv::Point(p, *cit));
-            m_coefficients_unary[index] += lambda / n_neighbor_set;
+            int index = get_index(knn, cv::Point(p, *cit_m));
+            m_coefficients_unary[index] += coefficient_u;
+            indices_p.push_back(index);
         }
-    }
-#else
-    const std::vector<std::vector<int> > &left_neighbors =
-            m_p_global_data->m_neighbors_left;
-    for (size_t p = 0; p < n_points; ++p)
-    {
-        for (size_t q = 0; q < p; ++q)
+        cit_m = left_matches[q].begin();
+        cit_m_end = left_matches[q].end();
+        for (; cit_m != cit_m_end; ++cit_m)
         {
-            const std::vector<int> &neighbors_p = left_neighbors[p];
-            const std::vector<int> &neighbors_q = left_neighbors[q];
-            if (in_neighbor(q, neighbors_p) || in_neighbor(p, neighbors_q))
-            {
-                /*!< unary coefficients */
-                std::vector<int> indices_p, indices_q; /*!< indices of matches */
-                indices_p.reserve(left_matches[p].size());
-                std::vector<int>::const_iterator cit = left_matches[p].begin();
-                std::vector<int>::const_iterator cit_end = left_matches[p].end();
-                for (; cit != cit_end; ++cit)
-                {
-                    int index = get_index(knn, cv::Point(p, *cit));
-                    m_coefficients_unary[index] += coefficient_u;
-                    indices_p.push_back(index);
-                }
-                indices_q.reserve(left_matches[q].size());
-                cit = left_matches[q].begin();
-                cit_end = left_matches[q].end();
-                for (; cit != cit_end; ++cit)
-                {
-                    int index = get_index(knn, cv::Point(q, *cit));
-                    m_coefficients_unary[index] += coefficient_u;
-                    indices_q.push_back(index);
-                }
+            int index = get_index(knn, cv::Point(q, *cit_m));
+            m_coefficients_unary[index] += coefficient_u;
+            indices_q.push_back(index);
+        }
 
-                /*!< binary coefficients */
-                std::vector<int>::const_iterator cit_p = indices_p.begin();
-                std::vector<int>::const_iterator cit_p_end = indices_p.end();
-                for (; cit_p != cit_p_end; ++cit_p)
+        /*!< binary coefficients */
+        std::vector<int>::const_iterator cit_p = indices_p.begin();
+        std::vector<int>::const_iterator cit_p_end = indices_p.end();
+        for (; cit_p != cit_p_end; ++cit_p)
+        {
+            int i_p = *cit_p;
+            int i_p_match = match_set[i_p].y;
+            std::vector<int>::const_iterator cit_q = indices_q.begin();
+            std::vector<int>::const_iterator cit_q_end = indices_q.end();
+            for (; cit_q != cit_q_end; ++cit_q)
+            {
+                int i_q = *cit_q;
+                int i_q_match = match_set[i_q].y;
+                if (i_q_match == i_p_match)
                 {
-                    int i_p = *cit_p;
-                    int i_p_match = match_set[i_p].y;
-                    std::vector<int>::const_iterator cit_q = indices_q.begin();
-                    std::vector<int>::const_iterator cit_q_end = indices_q.end();
-                    for (; cit_q != cit_q_end; ++cit_q)
-                    {
-                        int i_q = *cit_q;
-                        int i_q_match = match_set[i_q].y;
-                        if (i_q_match == i_p_match)
-                        {
-                            continue;
-                        }
-                        if (i_p < i_q)
-                        {
-                            m_coefficients_binary[i_q][i_p] += coefficient_b;
-                        }
-                        else
-                        {
-                            m_coefficients_binary[i_p][i_q] += coefficient_b;
-                        }
-                    }
+                    continue;
+                }
+                if (i_p < i_q)
+                {
+                    m_coefficients_binary[i_q][i_p] += coefficient_b;
+                }
+                else
+                {
+                    m_coefficients_binary[i_p][i_q] += coefficient_b;
                 }
             }
         }
     }
-#endif
 
     /*!< right features */
     std::cout << "\tfor right features..." << std::endl;
     n_points = m_p_global_data->m_features_right.size();
-    const std::vector<std::vector<int> > &right_neighbors =
-            m_p_global_data->m_neighbors_right;
     const std::map<int, std::vector<int> > &right_matches =
             m_p_global_data->m_matches_right;
-    for (size_t p = 0; p < n_points; ++p)
-    {
-        for (size_t q = 0; q < p; ++q)
-        {
-            const std::vector<int> &neighbors_p = right_neighbors[p];
-            const std::vector<int> &neighbors_q = right_neighbors[q];
-            if (in_neighbor(q, neighbors_p) || in_neighbor(p, neighbors_q))
-            {
-                /*!< unary coefficients */
-                std::vector<int> indices_p, indices_q;
-                const std::vector<int> &matches_p = right_matches.find(p)->second;
-                indices_p.reserve(matches_p.size());
-                std::vector<int>::const_iterator cit = matches_p.begin();
-                std::vector<int>::const_iterator cit_end = matches_p.end();
-                for (; cit != cit_end; ++cit)
-                {
-                    int index = get_index(knn, cv::Point(p, *cit));
-                    m_coefficients_unary[index] += coefficient_u;
-                    indices_p.push_back(index);
-                }
-                const std::vector<int> &matches_q = right_matches.find(q)->second;
-                indices_q.reserve(matches_q.size());
-                cit = matches_q.begin();
-                cit_end = matches_q.end();
-                for (; cit != cit_end; ++cit)
-                {
-                    int index = get_index(knn, cv::Point(q, *cit));
-                    m_coefficients_unary[index] += coefficient_u;
-                    indices_q.push_back(index);
-                }
 
-                /*!< binary coefficients */
-                std::vector<int>::const_iterator cit_p = indices_p.begin();
-                std::vector<int>::const_iterator cit_p_end = indices_p.end();
-                for (; cit_p != cit_p_end; ++cit_p)
+    cit = m_p_global_data->m_neighbors_set_right.begin();
+    cit_end = m_p_global_data->m_neighbors_set_right.end();
+    for (; cit != cit_end; ++cit)
+    {
+        int p = cit->x;
+        int q = cit->y;
+        std::vector<int> indices_p, indices_q; /*!< indices of matches */
+        const std::vector<int> &matches_p = right_matches.find(p)->second;
+        const std::vector<int> &matches_q = right_matches.find(q)->second;
+        indices_p.reserve(matches_p.size());
+        indices_q.reserve(matches_q.size());
+
+        /*!< unary coefficients */
+        std::vector<int>::const_iterator cit_m = matches_p.begin();
+        std::vector<int>::const_iterator cit_m_end = matches_p.end();
+        for (; cit_m != cit_m_end; ++cit_m)
+        {
+            int index = get_index(knn, cv::Point(*cit_m, p));
+            m_coefficients_unary[index] += coefficient_u;
+            indices_p.push_back(index);
+        }
+        cit_m = matches_q.begin();
+        cit_m_end = matches_q.end();
+        for (; cit_m != cit_m_end; ++cit_m)
+        {
+            int index = get_index(knn, cv::Point(*cit_m, q));
+            m_coefficients_unary[index] += coefficient_u;
+            indices_q.push_back(index);
+        }
+
+        /*!< binary coefficients */
+        std::vector<int>::const_iterator cit_p = indices_p.begin();
+        std::vector<int>::const_iterator cit_p_end = indices_p.end();
+        for (; cit_p != cit_p_end; ++cit_p)
+        {
+            int i_p = *cit_p;
+            int i_p_match = match_set[i_p].x;
+            std::vector<int>::const_iterator cit_q = indices_q.begin();
+            std::vector<int>::const_iterator cit_q_end = indices_q.end();
+            for (; cit_q != cit_q_end; ++cit_q)
+            {
+                int i_q = *cit_q;
+                int i_q_match = match_set[i_q].x;
+                if (i_q_match == i_p_match)
                 {
-                    int i_p = *cit_p;
-                    int i_p_match = match_set[i_p].y;
-                    std::vector<int>::const_iterator cit_q = indices_q.begin();
-                    std::vector<int>::const_iterator cit_q_end = indices_q.end();
-                    for (; cit_q != cit_q_end; ++cit_q)
-                    {
-                        int i_q = *cit_q;
-                        int i_q_match = match_set[i_q].y;
-                        if (i_q_match == i_p_match)
-                        {
-                            continue;
-                        }
-                        if (i_p < i_q)
-                        {
-                            m_coefficients_binary[i_q][i_p] += coefficient_b;
-                        }
-                        else
-                        {
-                            m_coefficients_binary[i_p][i_q] += coefficient_b;
-                        }
-                    }
+                    continue;
+                }
+                if (i_p < i_q)
+                {
+                    m_coefficients_binary[i_q][i_p] += coefficient_b;
+                }
+                else
+                {
+                    m_coefficients_binary[i_p][i_q] += coefficient_b;
                 }
             }
         }
     }
-
     return true;
 }
 

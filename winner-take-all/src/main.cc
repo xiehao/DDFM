@@ -45,10 +45,10 @@ bool demo(void)
     cv::Mat_<uchar> mask_R = cv::Mat_<uchar>::zeros(R.size());
     CmEdges::const_iterator e_cit = edges_L.begin();
 //    CmEdges::const_iterator e_cit_end = edges_L.end();
-    CmEdges::const_iterator e_cit_end = edges_L.begin() + 4;
+    CmEdges::const_iterator e_cit_end = edges_L.begin() + 1;
     for (; e_cit != e_cit_end; ++e_cit)
     {
-        const int step = 10;
+        const int step = 50;
         const std::vector<cv::Point> &points = e_cit->pnts;
         size_t n_points = points.size();
         for (size_t i = 0; i < n_points; i += step)
@@ -105,8 +105,8 @@ bool demo(void)
     cv::imshow("L", L);
     cv::imshow("R", R);
     cv::waitKey();
-    cv::imwrite(workspace + "L.png", L);
-    cv::imwrite(workspace + "R.png", R);
+    cv::imwrite(workspace + "L-matches-wta.png", L);
+    cv::imwrite(workspace + "R-matches-wta.png", R);
 
     return true;
 }

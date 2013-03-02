@@ -30,7 +30,10 @@ GraphMatching* LoadMatchingFile(char* filename, bool load_neib = true)
 		{
 			int a, i0, i1;
 			if (!m || sscanf(&LINE[1], "%d %d %d %Lf\n", &a, &i0, &i1, &cost) != 4 
-			    || a!=_A++ || _A>A || i0<0 || i0>=N[0] || i1<0 || i1>=N[1]) { printf("%s: wrong format2!\n", filename); exit(1); }
+                || a!=_A++ || _A>A || i0<0 || i0>=N[0] || i1<0 || i1>=N[1])
+            {
+                printf("%s: wrong format2!\n", filename); exit(1);
+            }
 			m->AddAssignment(i0, i1, cost);
 		}
 		else if (LINE[0] == 'e')
@@ -75,13 +78,12 @@ GraphMatching *load_problem(const std::string &_file_name,
         return NULL;
     }
 
-    std::string line;
+    std::string line, word;
     int N0(0), N1(0), _A(0), _E(0), A(0), E(0);
     float cost(0);
     for (; std::getline(file, line);)
     {
         std::istringstream stream(line);
-        std::string word;
         stream >> word;
         if ("c" == word)
         {
@@ -107,8 +109,8 @@ GraphMatching *load_problem(const std::string &_file_name,
             /*!< assignment of a pair */
             int a(0), i0(0), i1(0);
             stream >> a >> i0 >> i1 >> cost;
-            if (!m || a != _A++ || _A > A || i0 < 0 || i1 > N0 || i1 < 0 ||
-                    i1 > N1)
+            if (!m || a != _A++ || _A > A || i0 < 0 || i0 >= N0 || i1 < 0 ||
+                    i1 >= N1)
             {
                 std::cerr << "wrong format 2!!" << std::endl;
                 break;
@@ -182,16 +184,18 @@ GraphMatching *load_problem(const std::string &_file_name,
 
 int main(void)
 {
+#if 0
     char *str = const_cast<char *>((workspace + "DATA.TXT").c_str());
     GraphMatching* m = LoadMatchingFile(str);
-//    GraphMatching *m = load_problem(workspace + "DATA.TXT");
-
+#else
+    GraphMatching *m = load_problem(workspace + "DATA.TXT");
+#endif
 	// you may need to experiment a bit with what subproblems to add. 
 
-	//m->AddLinearSubproblem();
-	//m->AddMaxflowSubproblem();
-	m->AddLocalSubproblems(3);
-	//m->AddTreeSubproblems();
+//    m->AddLinearSubproblem();
+    m->AddMaxflowSubproblem();
+    m->AddLocalSubproblems(3);
+//    m->AddTreeSubproblems();
 
 	m->SolveDD(10000, 1e-5);
 
